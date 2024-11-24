@@ -1,0 +1,114 @@
+name: Create Preview Resources
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  id-token: write
+  pull-requests: write
+  contents: write
+
+env:
+  TF_key: ""
+  TF_region: ap-northeast-1
+  GITHUB_BRANCH_NAME: ""
+  AWS_S3_BUCKET_CDN: ""
+  CLOUDFRONT_DISTRIBUTION_ID: ""
+  CLOUDFRONT_DOMAIN: ""
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint code
+        run: npm run lint
+
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.7.5
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OPENID_CONNECT_ROLE_ARN }}
+          aws-region: ap-northeast-1
+
+        # /で区切られたブランチ名では最後の/以降の要素を取得する
+        # #と_は-に変換する
+        # 大文字を小文字に変換
+        # 文字列を32文字に限定
+        # テキスト末尾の - を削除
+      - name: sanitize branch name
+        id: sanitize_branch_name
+        run: echo "GITHUB_BRANCH_NAME=$(echo ${{ github.head_ref }} | sed -e 's/.*\///' | sed -e 's/[#_]/-/g' | tr '[:upper:]' '[:lower:]' | cut -c 1-32 | sed -e 's/-*$//')" >> $GITHUB_ENV
+
+      - name: set env
+        id: set_env
+        run: echo "TF_key=preview/${{ env.GITHUB_BRANCH_NAME }}/terraform.tfstate" >> $GITHUB_ENV
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm i
+
+      - name: Build Next.js project
+        run: npm run build
+
+      - name: Init Terraform
+        working-directory: ./frontend/terraform
+        run: |
+          terraform init -backend-config="key=${{ env.TF_key }}" -backend-config="region=${{ env.TF_region }}"
+
+      - name: Create Preview Environment
+        working-directory: ./frontend/terraform
+        run: |
+          terraform apply -auto-approve -var="environment=${{ env.GITHUB_BRANCH_NAME }}"
+
+      - name: Set Terraform Output
+        working-directory: ./frontend/terraform
+        run: |
+          echo "CLOUDFRONT_DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id)" >> $GITHUB_ENV
+          echo "AWS_S3_BUCKET_CDN=$(terraform output -raw s3_bucket_name)" >> $GITHUB_ENV
+          echo "CLOUDFRONT_DOMAIN=$(terraform output -raw cloudfront_distribution_domain_name)" >> $GITHUB_ENV
+
+      - name: Sync S3 bucket
+        working-directory: ./frontend
+        run: aws s3 sync ./out s3://${{ env.AWS_S3_BUCKET_CDN }} --delete
+
+      - name: Invalidate CloudFront cache
+        run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
+
+      # 初回のみcloudfront domainをコメントとして追加
+      - name: Add cloudfront domain to PR comment
+        if: github.event_name == 'pull_request' && github.event.action == 'opened'
+        run: |
+          gh pr comment ${{ github.event.number }} --body ":rocket: Preview URL: https://${{ env.CLOUDFRONT_DOMAIN }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
