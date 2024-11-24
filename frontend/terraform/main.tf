@@ -31,7 +31,7 @@ variable "environment" {
 
 
 # ------------------------------------------------
-# S3 + CloudFront
+# S3
 # ------------------------------------------------
 
 resource "aws_s3_bucket" "static_nextjs_app" {
@@ -64,6 +64,9 @@ resource "aws_s3_bucket_policy" "static_nextjs_app" {
   policy = data.aws_iam_policy_document.static_nextjs_app.json
 }
 
+# ------------------------------------------------
+# CloudFront
+# ------------------------------------------------
 
 resource "aws_cloudfront_origin_access_control" "static_nextjs_app" {
   name                              = "static-nextjs-app-${var.environment}"
@@ -132,3 +135,32 @@ resource "aws_cloudfront_distribution" "static_nextjs_app" {
     Name = "static-nextjs-app-${var.environment}"
   }
 }
+
+
+output "s3_bucket_name" {
+  value = aws_s3_bucket.static_nextjs_app.bucket
+}
+
+output "cloudfront_distribution_id" {
+  value = aws_cloudfront_distribution.static_nextjs_app.id
+}
+
+
+# # ------------------------------------------------
+# # Next.jsのビルドイメージをs3にアップロード
+# # ------------------------------------------------
+# resource "null_resource" "update_source_files" {
+#   provisioner "local-exec" {
+#     command = "aws s3 sync --profile terraform ../out s3://${aws_s3_bucket.static_nextjs_app.bucket}/"
+#   }
+# }
+
+# # ------------------------------------------------
+# # CloudFrontのキャッシュを削除
+# # ------------------------------------------------
+
+# resource "null_resource" "invalidate_cache" {
+#   provisioner "local-exec" {
+#     command = "aws cloudfront create-invalidation --profile terraform --distribution-id ${aws_cloudfront_distribution.static_nextjs_app.id} --paths '/*'"
+#   }
+# }
