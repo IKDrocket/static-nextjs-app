@@ -168,3 +168,19 @@ output "cloudfront_distribution_domain_name" {
 #     command = "aws cloudfront create-invalidation --profile terraform --distribution-id ${aws_cloudfront_distribution.static_nextjs_app.id} --paths '/*'"
 #   }
 # }
+
+# ------------------------------------------------
+# destroy時にS3バケット内のファイルを削除
+# ------------------------------------------------
+resource "null_resource" "delete_s3_bucket" {
+  triggers = {
+    bucket = aws_s3_bucket.static_nextjs_app.bucket
+  }
+  depends_on = [
+    aws_s3_bucket.static_nextjs_app
+  ]
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws s3 rm s3://${self.triggers.bucket} --recursive"
+  }
+}
