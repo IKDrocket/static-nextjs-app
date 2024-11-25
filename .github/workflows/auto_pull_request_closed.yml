@@ -1,0 +1,55 @@
+name: Cleanup Resources
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  TF_key: ""
+  TF_region: ap-northeast-1
+  GITHUB_BRANCH_NAME: ""
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.7.5
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OPENID_CONNECT_ROLE_ARN }}
+          aws-region: ap-northeast-1
+
+      - name: sanitize branch name
+        id: sanitize_branch_name
+        run: echo "GITHUB_BRANCH_NAME=$(echo ${{ github.head_ref }} | sed -e 's/.*\///' | sed -e 's/[#_]/-/g' | tr '[:upper:]' '[:lower:]' | cut -c 1-32 | sed -e 's/-*$//')" >> $GITHUB_ENV
+
+      - name: set env
+        id: set_env
+        run: echo "TF_key=preview/${{ env.GITHUB_BRANCH_NAME }}/terraform.tfstate" >> $GITHUB_ENV
+
+      - name: Init Terraform
+        working-directory: ./frontend/terraform
+        run: |
+          terraform init -backend-config="key=${{ env.TF_key }}" -backend-config="region=${{ env.TF_region }}"
+
+      - name: Destroy Preview Environment
+        working-directory: ./frontend/terraform
+        run: |
+          terraform destroy -auto-approve -var="environment=${{ env.GITHUB_BRANCH_NAME }}"

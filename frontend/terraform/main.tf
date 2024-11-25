@@ -16,8 +16,8 @@ terraform {
 }
 
 provider "aws" {
-  profile = "terraform"
-  region  = "ap-northeast-1"
+  # profile = "terraform"
+  region = "ap-northeast-1"
 }
 
 # ------------------------------------------------
@@ -143,6 +143,10 @@ output "s3_bucket_name" {
 
 output "cloudfront_distribution_id" {
   value = aws_cloudfront_distribution.static_nextjs_app.id
+}
+
+output "cloudfront_distribution_domain_name" {
+  value = aws_cloudfront_distribution.static_nextjs_app.domain_name
 }
 
 
